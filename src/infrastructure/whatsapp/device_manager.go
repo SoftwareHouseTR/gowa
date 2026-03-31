@@ -65,8 +65,33 @@ func (m *DeviceManager) AddDevice(instance *DeviceInstance) {
 func (m *DeviceManager) GetDevice(id string) (*DeviceInstance, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	instance, ok := m.devices[id]
-	return instance, ok
+	if instance, ok := m.devices[id]; ok {
+		return instance, true
+	}
+
+	// Fallback: extract phone number and match against device JIDs.
+	// This handles the case where the caller uses "session_905327870672"
+	// but the device is registered under its JID "905327870672@s.whatsapp.net".
+	phone := id
+	if after, found := strings.CutPrefix(phone, "session_"); found {
+		phone = after
+	}
+	if phone != "" && !strings.Contains(phone, "@") {
+		for _, inst := range m.devices {
+			jid := inst.JID()
+			if jid == "" {
+				continue
+			}
+			// JID format: "905327870672@s.whatsapp.net" or "905327870672:52@s.whatsapp.net"
+			user := strings.SplitN(jid, "@", 2)[0]
+			user = strings.SplitN(user, ":", 2)[0]
+			if user == phone {
+				return inst, true
+			}
+		}
+	}
+
+	return nil, false
 }
 
 // IsHealthy returns true if the device manager is initialized and has a valid store connection.
