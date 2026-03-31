@@ -588,8 +588,8 @@ func (m *DeviceManager) configureKeysStore(ctx context.Context, device *store.De
 		return nil
 	}
 
+	syncKeysDevice(ctx, device, m.keys)
 	innerStore := sqlstore.NewSQLStore(m.keys, *device.ID)
-	syncKeysDevice(ctx, m.store, m.keys)
 
 	device.Identities = innerStore
 	device.Sessions = innerStore

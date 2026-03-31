@@ -32,32 +32,29 @@ var (
 	startupTime   = time.Now().Unix()
 )
 
-func syncKeysDevice(ctx context.Context, db, keysDB *sqlstore.Container) {
-	if keysDB == nil {
+// syncKeysDevice ensures the given device exists in the keys database.
+// It only adds/updates the specific device rather than deleting others,
+// so that multiple devices can coexist in the keys store.
+func syncKeysDevice(ctx context.Context, device *store.Device, keysDB *sqlstore.Container) {
+	if keysDB == nil || device == nil || device.ID == nil {
 		return
 	}
 
-	dev, err := db.GetFirstDevice(ctx)
+	devs, err := keysDB.GetAllDevices(ctx)
 	if err != nil {
-		log.Errorf("Failed to get all devices: %v", err)
-	} else {
-		found := false
-		if devs, err := keysDB.GetAllDevices(ctx); err != nil {
-			log.Errorf("Failed to get all devices: %v", err)
-		} else {
-			for _, d := range devs {
-				if d.ID == dev.ID {
-					found = true
-					break
-				} else {
-					keysDB.DeleteDevice(ctx, d)
-				}
-			}
+		log.Errorf("Failed to get devices from keys store: %v", err)
+		return
+	}
 
-			if !found {
-				keysDB.PutDevice(ctx, dev)
-			}
+	for _, d := range devs {
+		if d.ID != nil && *d.ID == *device.ID {
+			return // device already exists in keys store
 		}
+	}
+
+	// Device not found in keys store, add it
+	if err := keysDB.PutDevice(ctx, device); err != nil {
+		log.Errorf("Failed to sync device %v to keys store: %v", device.ID, err)
 	}
 }
 
@@ -87,7 +84,7 @@ func InitWaCLI(ctx context.Context, storeContainer, keysStoreContainer *sqlstore
 	if keysContainer != nil && device.ID != nil {
 		innerStore := sqlstore.NewSQLStore(keysStoreContainer, *device.ID)
 
-		syncKeysDevice(ctx, primaryDB, keysContainer)
+		syncKeysDevice(ctx, device, keysContainer)
 		device.Identities = innerStore
 		device.Sessions = innerStore
 		device.PreKeys = innerStore

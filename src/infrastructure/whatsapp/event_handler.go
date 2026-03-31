@@ -149,7 +149,11 @@ func handlePairSuccess(ctx context.Context, evt *events.PairSuccess) {
 		Message: fmt.Sprintf("Successfully pair with %s", evt.ID.String()),
 	}
 	primaryDB, secondaryDB := getStoreContainers()
-	syncKeysDevice(ctx, primaryDB, secondaryDB)
+	if secondaryDB != nil {
+		if dev, err := primaryDB.GetFirstDevice(ctx); err == nil && dev != nil {
+			syncKeysDevice(ctx, dev, secondaryDB)
+		}
+	}
 }
 
 func handleLoggedOut(ctx context.Context, instance *DeviceInstance, chatStorageRepo domainChatStorage.IChatStorageRepository) {
