@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"mime"
 	"net/http"
 	"os"
@@ -50,8 +51,34 @@ func NewSendService(appService app.IAppUsecase, chatStorageRepo domainChatStorag
 	}
 }
 
+// simulateTypingPresence sends composing presence, waits a random duration (750-1500ms),
+// then sends paused presence to mimic human typing behavior and reduce spam detection.
+func simulateTypingPresence(ctx context.Context, client *whatsmeow.Client, recipient types.JID) {
+	// Send "composing" (typing started)
+	if err := client.SendChatPresence(ctx, recipient, types.ChatPresenceComposing, types.ChatPresenceMedia("")); err != nil {
+		logrus.Debugf("Failed to send composing presence: %v", err)
+		return
+	}
+
+	// Wait random 750ms-1500ms
+	delay := time.Duration(750+rand.Intn(751)) * time.Millisecond
+	select {
+	case <-time.After(delay):
+	case <-ctx.Done():
+		return
+	}
+
+	// Send "paused" (typing stopped)
+	if err := client.SendChatPresence(ctx, recipient, types.ChatPresencePaused, types.ChatPresenceMedia("")); err != nil {
+		logrus.Debugf("Failed to send paused presence: %v", err)
+	}
+}
+
 // wrapSendMessage wraps the message sending process with message ID saving
 func (service serviceSend) wrapSendMessage(ctx context.Context, client *whatsmeow.Client, recipient types.JID, msg *waE2E.Message, content string) (whatsmeow.SendResponse, error) {
+	// Simulate human typing before sending
+	simulateTypingPresence(ctx, client, recipient)
+
 	ts, err := client.SendMessage(ctx, recipient, msg)
 	if err != nil {
 		return whatsmeow.SendResponse{}, err

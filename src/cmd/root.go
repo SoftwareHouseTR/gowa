@@ -146,6 +146,9 @@ func initEnvConfig() {
 	if envPresenceOnConnect := viper.GetString("whatsapp_presence_on_connect"); envPresenceOnConnect != "" {
 		config.WhatsappPresenceOnConnect = envPresenceOnConnect
 	}
+	if viper.IsSet("whatsapp_chat_storage") {
+		config.WhatsappChatStorage = viper.GetBool("whatsapp_chat_storage")
+	}
 
 	// Chatwoot settings
 	if viper.IsSet("chatwoot_enabled") {
@@ -363,14 +366,19 @@ func initApp() {
 
 	ctx := context.Background()
 
-	chatStorageDB, err = initChatStorage()
-	if err != nil {
-		// Terminate the application if chat storage fails to initialize to avoid nil pointer panics later.
-		logrus.Fatalf("failed to initialize chat storage: %v", err)
-	}
+	if config.WhatsappChatStorage {
+		chatStorageDB, err = initChatStorage()
+		if err != nil {
+			// Terminate the application if chat storage fails to initialize to avoid nil pointer panics later.
+			logrus.Fatalf("failed to initialize chat storage: %v", err)
+		}
 
-	chatStorageRepo = chatstorage.NewStorageRepository(chatStorageDB)
-	chatStorageRepo.InitializeSchema()
+		chatStorageRepo = chatstorage.NewStorageRepository(chatStorageDB)
+		chatStorageRepo.InitializeSchema()
+	} else {
+		logrus.Info("Chat storage is disabled (WHATSAPP_CHAT_STORAGE=false)")
+		chatStorageRepo = chatstorage.NewNoopRepository()
+	}
 
 	whatsappDB := whatsapp.InitWaDB(ctx, config.DBURI)
 	var keysDB *sqlstore.Container
