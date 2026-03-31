@@ -28,12 +28,12 @@ var (
 
 func handleRegister(conn *websocket.Conn) {
 	Clients[conn] = client{}
-	logrus.Println("connection registered")
+	logrus.Debugln("connection registered")
 }
 
 func handleUnregister(conn *websocket.Conn) {
 	delete(Clients, conn)
-	logrus.Println("connection unregistered")
+	logrus.Debugln("connection unregistered")
 }
 
 func broadcastMessage(message BroadcastMessage) {
@@ -71,7 +71,7 @@ func RunHub() {
 			handleUnregister(conn)
 
 		case message := <-Broadcast:
-			logrus.Println("message received:", message)
+			logrus.Debugln("message received:", message)
 			broadcastMessage(message)
 		}
 	}

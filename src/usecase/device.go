@@ -6,6 +6,7 @@ import (
 
 	domainDevice "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/device"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
+	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/websocket"
 )
 
@@ -40,7 +41,7 @@ func (s *serviceDevice) GetDevice(_ context.Context, deviceID string) (*domainDe
 		device := convertInstance(inst)
 		return &device, nil
 	}
-	return nil, fmt.Errorf("device %s not found", deviceID)
+	return nil, pkgError.NotFoundError(fmt.Sprintf("device %s not found", deviceID))
 }
 
 func (s *serviceDevice) AddDevice(ctx context.Context, deviceID string) (*domainDevice.Device, error) {
@@ -119,7 +120,7 @@ func (s *serviceDevice) ReconnectDevice(_ context.Context, deviceID string) erro
 		client.Disconnect()
 		return client.Connect()
 	}
-	return fmt.Errorf("device %s not found", deviceID)
+	return pkgError.NotFoundError(fmt.Sprintf("device %s not found", deviceID))
 }
 
 func (s *serviceDevice) GetStatus(_ context.Context, deviceID string) (bool, bool, error) {
@@ -142,7 +143,7 @@ func (s *serviceDevice) GetStatus(_ context.Context, deviceID string) (bool, boo
 		_ = state
 		return client.IsConnected(), client.IsLoggedIn(), nil
 	}
-	return false, false, fmt.Errorf("device %s not found", deviceID)
+	return false, false, pkgError.NotFoundError(fmt.Sprintf("device %s not found", deviceID))
 }
 
 func convertInstance(inst *whatsapp.DeviceInstance) domainDevice.Device {

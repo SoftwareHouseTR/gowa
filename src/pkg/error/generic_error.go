@@ -63,6 +63,21 @@ func RequestTimeout(text string) GenericError {
 	return TimeoutError(text)
 }
 
+// NotFoundError represents a 404 not-found error
+type NotFoundError string
+
+func (e NotFoundError) Error() string {
+	return string(e)
+}
+
+func (e NotFoundError) ErrCode() string {
+	return "NOT_FOUND"
+}
+
+func (e NotFoundError) StatusCode() int {
+	return http.StatusNotFound
+}
+
 var (
 	ErrInternalServerError = InternalServerError("internal server error")
 	ErrRequestTimeout      = TimeoutError("request timed out waiting for WhatsApp server response")

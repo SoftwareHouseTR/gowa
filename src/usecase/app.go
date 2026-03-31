@@ -216,7 +216,7 @@ func (service *serviceApp) Status(_ context.Context, deviceID string) (bool, boo
 
 	instance, ok := service.deviceManager.GetDevice(deviceID)
 	if !ok || instance == nil {
-		return false, false, fmt.Errorf("device %s not found", deviceID)
+		return false, false, pkgError.NotFoundError(fmt.Sprintf("device %s not found", deviceID))
 	}
 
 	instance.UpdateStateFromClient()
