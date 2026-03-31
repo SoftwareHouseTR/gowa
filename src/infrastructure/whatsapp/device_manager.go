@@ -41,6 +41,14 @@ func NewDeviceManager(store *sqlstore.Container, keys *sqlstore.Container, chatS
 	}
 }
 
+// SetStorage replaces the storage backend used for device registry persistence.
+// This allows the device registry to use a real database even when chat storage is disabled.
+func (m *DeviceManager) SetStorage(storage domainChatStorage.IChatStorageRepository) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.storage = storage
+}
+
 func (m *DeviceManager) AddDevice(instance *DeviceInstance) {
 	if instance == nil || instance.ID() == "" {
 		return

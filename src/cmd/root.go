@@ -366,15 +366,16 @@ func initApp() {
 
 	ctx := context.Background()
 
-	if config.WhatsappChatStorage {
-		chatStorageDB, err = initChatStorage()
-		if err != nil {
-			// Terminate the application if chat storage fails to initialize to avoid nil pointer panics later.
-			logrus.Fatalf("failed to initialize chat storage: %v", err)
-		}
+	// Always initialize storage DB for device registry persistence
+	chatStorageDB, err = initChatStorage()
+	if err != nil {
+		logrus.Fatalf("failed to initialize storage: %v", err)
+	}
+	deviceRegistryRepo := chatstorage.NewStorageRepository(chatStorageDB)
+	deviceRegistryRepo.InitializeSchema()
 
-		chatStorageRepo = chatstorage.NewStorageRepository(chatStorageDB)
-		chatStorageRepo.InitializeSchema()
+	if config.WhatsappChatStorage {
+		chatStorageRepo = deviceRegistryRepo
 	} else {
 		logrus.Info("Chat storage is disabled (WHATSAPP_CHAT_STORAGE=false)")
 		chatStorageRepo = chatstorage.NewNoopRepository()
@@ -391,6 +392,9 @@ func initApp() {
 	// Initialize device manager and usecase for multi-device support
 	dm := whatsapp.GetDeviceManager()
 	if dm != nil {
+		if !config.WhatsappChatStorage {
+			dm.SetStorage(deviceRegistryRepo)
+		}
 		_ = dm.LoadExistingDevices(ctx)
 	}
 
