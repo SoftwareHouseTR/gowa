@@ -6,11 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
 	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
+
+const rateLimitCooldown = 5 * time.Second
 
 func Recovery() fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
@@ -23,16 +26,32 @@ func Recovery() fiber.Handler {
 			return nextErr
 		}
 
-		// Error 479: WhatsApp rate limit — retry once after 5 seconds
 		errMsg := fmt.Sprintf("%v", panicVal)
-		if strings.Contains(errMsg, "server returned error 479") {
-			retryCount, _ := ctx.Locals("__retry_479").(int)
+
+		// WhatsApp rate limit (error 479/420): set device cooldown, wait 5s, retry once
+		if isWhatsAppRateLimit(errMsg) {
+			if device, ok := ctx.Locals("device").(*whatsapp.DeviceInstance); ok && device != nil {
+				device.SetRateLimited(rateLimitCooldown)
+			}
+
+			retryCount, _ := ctx.Locals("__rate_limit_retry").(int)
 			if retryCount < 1 {
-				ctx.Locals("__retry_479", retryCount+1)
-				logrus.Warnf("[RATE_LIMIT] Error 479 detected, retrying in 5s...")
-				time.Sleep(5 * time.Second)
+				ctx.Locals("__rate_limit_retry", retryCount+1)
+				deviceID, _ := ctx.Locals("device_id").(string)
+				logrus.Warnf("[RATE_LIMIT] WhatsApp rate limit hit for device %s, retrying in %s...", deviceID, rateLimitCooldown)
+				time.Sleep(rateLimitCooldown)
 				return ctx.RestartRouting()
 			}
+
+			// Retry also failed — return 429
+			deviceID, _ := ctx.Locals("device_id").(string)
+			logrus.Errorf("[RATE_LIMIT] WhatsApp rate limit persists for device %s after retry", deviceID)
+			ctx.Set("Retry-After", fmt.Sprintf("%.0f", rateLimitCooldown.Seconds()))
+			return ctx.Status(fiber.StatusTooManyRequests).JSON(utils.ResponseData{
+				Status:  fiber.StatusTooManyRequests,
+				Code:    "RATE_LIMITED",
+				Message: fmt.Sprintf("WhatsApp rate limit hit, retry after %s", rateLimitCooldown),
+			})
 		}
 
 		var res utils.ResponseData
@@ -71,4 +90,9 @@ func catchPanic(fn func()) (val interface{}) {
 	defer func() { val = recover() }()
 	fn()
 	return nil
+}
+
+func isWhatsAppRateLimit(errMsg string) bool {
+	return strings.Contains(errMsg, "server returned error 479") ||
+		strings.Contains(errMsg, "server returned error 420")
 }

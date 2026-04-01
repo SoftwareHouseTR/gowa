@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -57,6 +58,16 @@ func DeviceMiddleware(dm *whatsapp.DeviceManager) fiber.Handler {
 				Code:    "DEVICE_ID_REQUIRED",
 				Message: "device_id is required via X-Device-Id header or device_id query",
 				Results: nil,
+			})
+		}
+
+		// Reject requests while the device is in rate-limit cooldown
+		if remaining := instance.RateLimitRemaining(); remaining > 0 {
+			c.Set("Retry-After", fmt.Sprintf("%.0f", remaining.Seconds()))
+			return c.Status(fiber.StatusTooManyRequests).JSON(utils.ResponseData{
+				Status:  fiber.StatusTooManyRequests,
+				Code:    "RATE_LIMITED",
+				Message: fmt.Sprintf("WhatsApp rate limit active for device %s, retry after %.0fs", resolvedID, remaining.Seconds()),
 			})
 		}
 

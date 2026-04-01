@@ -21,6 +21,8 @@ type DeviceInstance struct {
 	jid             string
 	createdAt       time.Time
 	onLoggedOut     func(deviceID string) // Callback for remote logout cleanup
+
+	rateLimitedUntil time.Time // blocks requests until this time after a WhatsApp rate-limit error
 }
 
 func NewDeviceInstance(deviceID string, client *whatsmeow.Client, chatStorageRepo domainChatStorage.IChatStorageRepository) *DeviceInstance {
@@ -170,4 +172,28 @@ func (d *DeviceInstance) TriggerLoggedOut() {
 	if callback != nil {
 		callback(deviceID)
 	}
+}
+
+// SetRateLimited marks the device as rate-limited for the given duration.
+func (d *DeviceInstance) SetRateLimited(dur time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.rateLimitedUntil = time.Now().Add(dur)
+}
+
+// IsRateLimited returns true if the device is currently in a rate-limit cooldown.
+func (d *DeviceInstance) IsRateLimited() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return time.Now().Before(d.rateLimitedUntil)
+}
+
+// RateLimitRemaining returns the remaining cooldown duration (zero if not rate-limited).
+func (d *DeviceInstance) RateLimitRemaining() time.Duration {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if rem := time.Until(d.rateLimitedUntil); rem > 0 {
+		return rem
+	}
+	return 0
 }
