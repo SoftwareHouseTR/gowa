@@ -27,10 +27,11 @@ export default {
                 // Reset groups before fetching new data
                 this.groups = [];
                 await this.submitApi();
-                $('#modalGroupList').modal('show');
-                // Wait a bit for modal animation to complete before initializing DataTable
-                await new Promise(resolve => setTimeout(resolve, 100));
-                await this.dtRebuild();
+                $('#modalGroupList').modal({
+                    onVisible: async () => {
+                        await this.dtRebuild();
+                    }
+                }).modal('show');
                 showSuccessInfo("Groups fetched")
             } catch (err) {
                 showErrorInfo(err)

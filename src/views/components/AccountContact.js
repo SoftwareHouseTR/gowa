@@ -8,23 +8,35 @@ export default {
     methods: {
         async openModal() {
             try {
-                this.dtClear()
+                this.dtClear();
+                this.contacts = [];
                 await this.submitApi();
-                $('#modalContactList').modal('show');
-                this.dtRebuild()
+                $('#modalContactList').modal({
+                    onVisible: async () => {
+                        await this.dtRebuild();
+                    }
+                }).modal('show');
                 showSuccessInfo("Contacts fetched")
             } catch (err) {
                 showErrorInfo(err)
             }
         },
         dtClear() {
-            $('#account_contacts_table').DataTable().destroy();
+            const table = $('#account_contacts_table');
+            if ($.fn.DataTable.isDataTable(table)) {
+                table.DataTable().clear().destroy();
+            }
         },
-        dtRebuild() {
-            $('#account_contacts_table').DataTable({
-                "pageLength": 10,
-                "reloadData": true,
-            }).draw();
+        async dtRebuild() {
+            await this.$nextTick();
+            await new Promise(resolve => setTimeout(resolve, 100));
+            const table = $('#account_contacts_table');
+            if ($.fn.DataTable.isDataTable(table)) {
+                table.DataTable().destroy();
+            }
+            table.DataTable({
+                pageLength: 10,
+            });
         },
         async submitApi() {
             try {
