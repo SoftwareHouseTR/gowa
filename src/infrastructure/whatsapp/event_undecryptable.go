@@ -29,21 +29,16 @@ const sessionResetCooldown = 5 * time.Minute
 // exchange triggers a fresh PreKey handshake.
 func handleUndecryptableMessage(ctx context.Context, evt *events.UndecryptableMessage, deviceID string, client *whatsmeow.Client) {
 	sender := evt.Info.Sender.ToNonAD().String()
-	chat := evt.Info.Chat.ToNonAD().String()
-
-	// Log every occurrence so operators can correlate with the libsignal MAC errors.
-	logrus.WithFields(logrus.Fields{
-		"device_id":  deviceID,
-		"sender":     sender,
-		"chat":       chat,
-		"message_id": evt.Info.ID,
-		"unavailable": evt.IsUnavailable,
-	}).Warn("[DECRYPT] Undecryptable message received")
 
 	// If the ciphertext was never sent to us (IsUnavailable), there is no
 	// corrupted session to reset — the sender simply didn't encrypt for
 	// this device. whatsmeow already requests a retry in this case.
 	if evt.IsUnavailable {
+		logrus.WithFields(logrus.Fields{
+			"device_id":  deviceID,
+			"sender":     sender,
+			"message_id": evt.Info.ID,
+		}).Debug("[DECRYPT] Unavailable message (no ciphertext for this device)")
 		return
 	}
 
@@ -62,10 +57,6 @@ func handleUndecryptableMessage(ctx context.Context, evt *events.UndecryptableMe
 	sessionResetMu.Lock()
 	if last, ok := sessionResetHistory[resetKey]; ok && time.Since(last) < sessionResetCooldown {
 		sessionResetMu.Unlock()
-		logrus.WithFields(logrus.Fields{
-			"device_id": deviceID,
-			"sender":    sender,
-		}).Debug("[DECRYPT] Session reset skipped (cooldown active)")
 		return
 	}
 	sessionResetHistory[resetKey] = time.Now()
@@ -86,6 +77,6 @@ func handleUndecryptableMessage(ctx context.Context, evt *events.UndecryptableMe
 	logrus.WithFields(logrus.Fields{
 		"device_id": deviceID,
 		"sender":    sender,
-		"phone":     phone,
-	}).Info("[DECRYPT] Signal sessions reset — next exchange will use fresh PreKey handshake")
+		"chat":      evt.Info.Chat.ToNonAD().String(),
+	}).Warn("[DECRYPT] Signal sessions reset for sender — next exchange will use fresh PreKey handshake")
 }
