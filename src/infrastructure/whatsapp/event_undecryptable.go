@@ -78,5 +78,5 @@ func handleUndecryptableMessage(ctx context.Context, evt *events.UndecryptableMe
 		"device_id": deviceID,
 		"sender":    sender,
 		"chat":      evt.Info.Chat.ToNonAD().String(),
-	}).Warn("[DECRYPT] Signal sessions reset for sender — next exchange will use fresh PreKey handshake")
+	}).Debug("[DECRYPT] Signal sessions reset for sender — next exchange will use fresh PreKey handshake")
 }
