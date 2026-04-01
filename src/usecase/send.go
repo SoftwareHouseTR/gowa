@@ -291,19 +291,25 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 	}
 	deletedItems = append(deletedItems, oriImagePath)
 
-	/* Generate thumbnail with smalled image size */
+	/* Generate thumbnail with smaller image size (best-effort, non-fatal on failure) */
+	var dataWaThumbnail []byte
 	srcImage, err := imaging.Open(oriImagePath)
 	if err != nil {
-		return response, pkgError.InternalServerError(fmt.Sprintf("Failed to open image file '%s' for thumbnail generation: %v. Possible causes: file not found, unsupported format, or permission denied.", oriImagePath, err))
+		logrus.Warnf("Failed to open image '%s' for thumbnail generation: %v, sending without thumbnail", oriImagePath, err)
+	} else {
+		resizedImage := imaging.Resize(srcImage, 100, 0, imaging.Lanczos)
+		imageThumbnail = fmt.Sprintf("%s/thumbnails-%s", config.PathSendItems, imageName)
+		if err = imaging.Save(resizedImage, imageThumbnail); err != nil {
+			logrus.Warnf("Failed to save thumbnail: %v, sending without thumbnail", err)
+		} else {
+			deletedItems = append(deletedItems, imageThumbnail)
+			dataWaThumbnail, err = os.ReadFile(imageThumbnail)
+			if err != nil {
+				logrus.Warnf("Failed to read thumbnail: %v, sending without thumbnail", err)
+				dataWaThumbnail = nil
+			}
+		}
 	}
-
-	// Resize Thumbnail
-	resizedImage := imaging.Resize(srcImage, 100, 0, imaging.Lanczos)
-	imageThumbnail = fmt.Sprintf("%s/thumbnails-%s", config.PathSendItems, imageName)
-	if err = imaging.Save(resizedImage, imageThumbnail); err != nil {
-		return response, pkgError.InternalServerError(fmt.Sprintf("failed to save thumbnail %v", err))
-	}
-	deletedItems = append(deletedItems, imageThumbnail)
 
 	if request.Compress {
 		// Resize image
@@ -333,11 +339,6 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 		fmt.Printf("failed to upload file: %v", err)
 		return response, err
 	}
-	dataWaThumbnail, err := os.ReadFile(imageThumbnail)
-	if err != nil {
-		return response, pkgError.InternalServerError(fmt.Sprintf("failed to read thumbnail %v", err))
-	}
-
 	msg := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
 		JPEGThumbnail: dataWaThumbnail,
 		Caption:       proto.String(dataWaCaption),
