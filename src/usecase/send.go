@@ -234,6 +234,10 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 		return response, err
 	}
 
+	// Generate a unique prefix per request to avoid race conditions
+	// when the same image is sent to multiple recipients concurrently.
+	uniquePrefix := fmt.Sprintf("%d_%d_", time.Now().UnixNano(), rand.Int63())
+
 	var (
 		imagePath      string
 		imageThumbnail string
@@ -274,20 +278,20 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 			imageData = pngBuffer.Bytes()
 		}
 
-		oriImagePath = fmt.Sprintf("%s/%s", config.PathSendItems, fileName)
-		imageName = fileName
+		imageName = uniquePrefix + fileName
+		oriImagePath = fmt.Sprintf("%s/%s", config.PathSendItems, imageName)
 		err = os.WriteFile(oriImagePath, imageData, 0644)
 		if err != nil {
 			return response, pkgError.InternalServerError(fmt.Sprintf("failed to save downloaded image %v", err))
 		}
 	} else if request.Image != nil {
 		// Save image to server
-		oriImagePath = fmt.Sprintf("%s/%s", config.PathSendItems, request.Image.Filename)
+		imageName = uniquePrefix + request.Image.Filename
+		oriImagePath = fmt.Sprintf("%s/%s", config.PathSendItems, imageName)
 		err = fasthttp.SaveMultipartFile(request.Image, oriImagePath)
 		if err != nil {
 			return response, err
 		}
-		imageName = request.Image.Filename
 	}
 	deletedItems = append(deletedItems, oriImagePath)
 
@@ -312,18 +316,22 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 	}
 
 	if request.Compress {
-		// Resize image
+		// Resize image (best-effort: if compression fails, send uncompressed)
 		openImageBuffer, err := imaging.Open(oriImagePath)
 		if err != nil {
-			return response, pkgError.InternalServerError(fmt.Sprintf("Failed to open image file '%s' for compression: %v. Possible causes: file not found, unsupported format, or permission denied.", oriImagePath, err))
+			logrus.Warnf("Failed to open image '%s' for compression: %v, sending uncompressed", oriImagePath, err)
+			imagePath = oriImagePath
+		} else {
+			newImage := imaging.Resize(openImageBuffer, 600, 0, imaging.Lanczos)
+			newImagePath := fmt.Sprintf("%s/new-%s", config.PathSendItems, imageName)
+			if err = imaging.Save(newImage, newImagePath); err != nil {
+				logrus.Warnf("Failed to save compressed image: %v, sending uncompressed", err)
+				imagePath = oriImagePath
+			} else {
+				deletedItems = append(deletedItems, newImagePath)
+				imagePath = newImagePath
+			}
 		}
-		newImage := imaging.Resize(openImageBuffer, 600, 0, imaging.Lanczos)
-		newImagePath := fmt.Sprintf("%s/new-%s", config.PathSendItems, imageName)
-		if err = imaging.Save(newImage, newImagePath); err != nil {
-			return response, pkgError.InternalServerError(fmt.Sprintf("failed to save image %v", err))
-		}
-		deletedItems = append(deletedItems, newImagePath)
-		imagePath = newImagePath
 	} else {
 		imagePath = oriImagePath
 	}
