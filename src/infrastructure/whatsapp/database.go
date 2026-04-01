@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -31,7 +32,21 @@ func initDatabase(ctx context.Context, dbLog waLog.Logger, DBURI string) (*sqlst
 	DBURI = strings.Trim(DBURI, `"'`)
 
 	if strings.HasPrefix(DBURI, "file:") {
-		return sqlstore.New(ctx, "sqlite3", DBURI, dbLog)
+		db, err := sql.Open("sqlite3", DBURI)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+		}
+		// Serialize all SQLite access through a single connection to prevent
+		// "database is locked" errors when many goroutines (e.g. group message
+		// retry receipt handlers) hit the database concurrently.
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+
+		container := sqlstore.NewWithDB(db, "sqlite3", dbLog)
+		if err = container.Upgrade(ctx); err != nil {
+			return nil, fmt.Errorf("failed to upgrade database: %w", err)
+		}
+		return container, nil
 	} else if strings.HasPrefix(DBURI, "postgres:") {
 		return sqlstore.New(ctx, "postgres", DBURI, dbLog)
 	}
