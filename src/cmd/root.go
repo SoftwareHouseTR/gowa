@@ -381,6 +381,8 @@ func initApp() {
 		chatStorageRepo = chatstorage.NewNoopRepository()
 	}
 
+	whatsapp.InitSignalLogger()
+
 	whatsappDB := whatsapp.InitWaDB(ctx, config.DBURI)
 	var keysDB *sqlstore.Container
 	if config.DBKeysURI != "" {

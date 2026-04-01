@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	sigLog "go.mau.fi/libsignal/logger"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -50,4 +51,38 @@ func (l *filteredLogger) Debugf(msg string, args ...interface{}) {
 
 func (l *filteredLogger) Sub(module string) waLog.Logger {
 	return newFilteredLogger(l.base.Sub(module))
+}
+
+// signalLogger implements go.mau.fi/libsignal/logger.Loggable to filter
+// noisy MAC mismatch errors that we already handle via UndecryptableMessage events.
+type signalLogger struct{}
+
+func isSignalMACError(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "mismatching mac") ||
+		strings.Contains(lower, "failed to verify ciphertext mac")
+}
+
+func (s *signalLogger) Debug(caller, message string)   {}
+func (s *signalLogger) Info(caller, message string)     { log.Infof("[Signal/%s] %s", caller, message) }
+func (s *signalLogger) Warning(caller, message string) {
+	if isSignalMACError(message) {
+		return
+	}
+	log.Warnf("[Signal/%s] %s", caller, message)
+}
+func (s *signalLogger) Error(caller, message string) {
+	if isSignalMACError(message) {
+		return
+	}
+	log.Errorf("[Signal/%s] %s", caller, message)
+}
+func (s *signalLogger) Configure(_ string) {}
+
+// InitSignalLogger replaces the default libsignal logger with a filtered
+// version that suppresses MAC mismatch errors already handled by our
+// UndecryptableMessage event handler.
+func InitSignalLogger() {
+	sl := sigLog.Loggable(&signalLogger{})
+	sigLog.Setup(&sl)
 }
