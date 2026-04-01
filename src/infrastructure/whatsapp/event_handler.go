@@ -164,13 +164,16 @@ func handleLoggedOut(ctx context.Context, instance *DeviceInstance, chatStorageR
 	}
 	instance.SetState(domainDevice.DeviceStateDisconnected)
 
+	deviceID := instance.ID()
+
 	if chatStorageRepo != nil {
-		if err := chatStorageRepo.TruncateAllDataWithLogging("REMOTE_LOGOUT"); err != nil {
-			logrus.Errorf("[REMOTE_LOGOUT] Failed to truncate chat storage: %v", err)
+		logrus.Infof("[REMOTE_LOGOUT] Deleting chat storage data for device %s", deviceID)
+		if err := chatStorageRepo.DeleteDeviceData(deviceID); err != nil {
+			logrus.Errorf("[REMOTE_LOGOUT] Failed to delete chat storage for device %s: %v", deviceID, err)
+		} else {
+			logrus.Infof("[REMOTE_LOGOUT] Chat storage data deleted for device %s", deviceID)
 		}
 	}
-
-	deviceID := instance.ID()
 
 	instance.TriggerLoggedOut()
 

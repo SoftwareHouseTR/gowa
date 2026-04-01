@@ -23,30 +23,33 @@ import (
 
 // DeviceManager keeps a registry of active device instances.
 type DeviceManager struct {
-	mu       sync.RWMutex
-	devices  map[string]*DeviceInstance
-	store    *sqlstore.Container
-	keys     *sqlstore.Container
-	storage  domainChatStorage.IChatStorageRepository
-	initted  bool
-	initOnce sync.Once
+	mu          sync.RWMutex
+	devices     map[string]*DeviceInstance
+	store       *sqlstore.Container
+	keys        *sqlstore.Container
+	chatStorage domainChatStorage.IChatStorageRepository // per-device chat/message storage (noop when disabled)
+	registry    domainChatStorage.IChatStorageRepository // device record persistence (always real DB)
+	initted     bool
+	initOnce    sync.Once
 }
 
 func NewDeviceManager(store *sqlstore.Container, keys *sqlstore.Container, chatStorageRepo domainChatStorage.IChatStorageRepository) *DeviceManager {
 	return &DeviceManager{
-		devices: make(map[string]*DeviceInstance),
-		store:   store,
-		keys:    keys,
-		storage: chatStorageRepo,
+		devices:     make(map[string]*DeviceInstance),
+		store:       store,
+		keys:        keys,
+		chatStorage: chatStorageRepo,
+		registry:    chatStorageRepo,
 	}
 }
 
-// SetStorage replaces the storage backend used for device registry persistence.
-// This allows the device registry to use a real database even when chat storage is disabled.
-func (m *DeviceManager) SetStorage(storage domainChatStorage.IChatStorageRepository) {
+// SetRegistry replaces the storage backend used for device registry persistence
+// (devices table only). This allows the device registry to use a real database
+// even when chat storage is disabled, without affecting per-device chat/message storage.
+func (m *DeviceManager) SetRegistry(storage domainChatStorage.IChatStorageRepository) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.storage = storage
+	m.registry = storage
 }
 
 func (m *DeviceManager) AddDevice(instance *DeviceInstance) {
@@ -59,8 +62,8 @@ func (m *DeviceManager) AddDevice(instance *DeviceInstance) {
 	m.devices[instance.ID()] = instance
 
 	// Persist registry entry if available
-	if m.storage != nil {
-		_ = m.storage.SaveDeviceRecord(&domainChatStorage.DeviceRecord{
+	if m.registry != nil {
+		_ = m.registry.SaveDeviceRecord(&domainChatStorage.DeviceRecord{
 			DeviceID:    instance.ID(),
 			DisplayName: instance.DisplayName(),
 			JID:         instance.JID(),
@@ -137,8 +140,8 @@ func (m *DeviceManager) RemoveDevice(id string) {
 	defer m.mu.Unlock()
 	delete(m.devices, id)
 
-	if m.storage != nil && strings.TrimSpace(id) != "" {
-		_ = m.storage.DeleteDeviceRecord(id)
+	if m.registry != nil && strings.TrimSpace(id) != "" {
+		_ = m.registry.DeleteDeviceRecord(id)
 	}
 }
 
@@ -168,8 +171,8 @@ func (m *DeviceManager) PurgeDevice(ctx context.Context, deviceID string) error 
 	}
 
 	// Delete chatstorage data for this device
-	if m.storage != nil {
-		if err := m.storage.DeleteDeviceData(deviceID); err != nil {
+	if m.registry != nil {
+		if err := m.registry.DeleteDeviceData(deviceID); err != nil {
 			logrus.WithError(err).Warnf("[DEVICE_MANAGER] failed to delete chatstorage for device %s", deviceID)
 			recordErr(err)
 		}
@@ -234,11 +237,11 @@ func (m *DeviceManager) CreateDevice(ctx context.Context, requestedID string) (*
 		return nil, fmt.Errorf("device %s already exists", id)
 	}
 
-	instance := NewDeviceInstance(id, nil, newDeviceChatStorage(id, m.storage))
+	instance := NewDeviceInstance(id, nil, newDeviceChatStorage(id, m.chatStorage))
 	m.devices[id] = instance
 
-	if m.storage != nil {
-		if err := m.storage.SaveDeviceRecord(&domainChatStorage.DeviceRecord{
+	if m.registry != nil {
+		if err := m.registry.SaveDeviceRecord(&domainChatStorage.DeviceRecord{
 			DeviceID:    id,
 			DisplayName: instance.DisplayName(),
 			JID:         instance.JID(),
@@ -286,8 +289,8 @@ func (m *DeviceManager) LoadExistingDevices(ctx context.Context) error {
 	})
 
 	// Load from persisted registry
-	if m.storage != nil {
-		records, err := m.storage.ListDeviceRecords()
+	if m.registry != nil {
+		records, err := m.registry.ListDeviceRecords()
 		if err != nil {
 			logrus.WithError(err).Warn("[DEVICE_MANAGER] failed to load device registry")
 		} else {
@@ -337,8 +340,8 @@ func (m *DeviceManager) LoadExistingDevices(ctx context.Context) error {
 			orphanDevice.mu.Lock()
 			orphanDevice.jid = jid
 			orphanDevice.mu.Unlock()
-			if m.storage != nil {
-				_ = m.storage.SaveDeviceRecord(&domainChatStorage.DeviceRecord{
+			if m.registry != nil {
+				_ = m.registry.SaveDeviceRecord(&domainChatStorage.DeviceRecord{
 					DeviceID: orphanDevice.ID(),
 					JID:      jid,
 				})
@@ -347,7 +350,7 @@ func (m *DeviceManager) LoadExistingDevices(ctx context.Context) error {
 		}
 
 		// Create new device instance
-		instance := NewDeviceInstance(jid, nil, newDeviceChatStorage(jid, m.storage))
+		instance := NewDeviceInstance(jid, nil, newDeviceChatStorage(jid, m.chatStorage))
 		instance.SetState(domainDevice.DeviceStateDisconnected)
 		m.AddDevice(instance)
 	}
@@ -379,7 +382,7 @@ func (m *DeviceManager) loadFromRegistry(records []*domainChatStorage.DeviceReco
 		isAutoCreated := strings.Contains(rec.DeviceID, "@")
 		if isAutoCreated && manualDeviceJIDs[rec.DeviceID] {
 			logrus.Warnf("[DEVICE_MANAGER] removing auto-created device %s", rec.DeviceID)
-			_ = m.storage.DeleteDeviceRecord(rec.DeviceID)
+			_ = m.registry.DeleteDeviceRecord(rec.DeviceID)
 			continue
 		}
 
@@ -387,7 +390,7 @@ func (m *DeviceManager) loadFromRegistry(records []*domainChatStorage.DeviceReco
 		if rec.JID != "" {
 			if seenJIDs[rec.JID] {
 				logrus.Warnf("[DEVICE_MANAGER] removing duplicate JID device %s", rec.DeviceID)
-				_ = m.storage.DeleteDeviceRecord(rec.DeviceID)
+				_ = m.registry.DeleteDeviceRecord(rec.DeviceID)
 				continue
 			}
 			seenJIDs[rec.JID] = true
@@ -417,7 +420,7 @@ func (m *DeviceManager) loadFromRegistry(records []*domainChatStorage.DeviceReco
 		if rec.JID != "" {
 			storageDeviceID = rec.JID
 		}
-		instance := NewDeviceInstance(rec.DeviceID, nil, newDeviceChatStorage(storageDeviceID, m.storage))
+		instance := NewDeviceInstance(rec.DeviceID, nil, newDeviceChatStorage(storageDeviceID, m.chatStorage))
 		instance.SetState(domainDevice.DeviceStateDisconnected)
 		instance.displayName = rec.DisplayName
 		instance.jid = rec.JID
@@ -495,7 +498,7 @@ func (m *DeviceManager) EnsureClient(ctx context.Context, deviceID string) (*Dev
 
 	repo := inst.GetChatStorage()
 	if repo == nil {
-		repo = newDeviceChatStorage(deviceID, m.storage)
+		repo = newDeviceChatStorage(deviceID, m.chatStorage)
 		inst.SetChatStorage(repo)
 	}
 
@@ -524,7 +527,7 @@ func (m *DeviceManager) ensureInstance(deviceID string) *DeviceInstance {
 			if storageDeviceID == "" {
 				storageDeviceID = deviceID
 			}
-			inst.SetChatStorage(newDeviceChatStorage(storageDeviceID, m.storage))
+			inst.SetChatStorage(newDeviceChatStorage(storageDeviceID, m.chatStorage))
 		}
 		return inst
 	}
@@ -537,13 +540,13 @@ func (m *DeviceManager) ensureInstance(deviceID string) *DeviceInstance {
 				if storageDeviceID == "" {
 					storageDeviceID = inst.ID()
 				}
-				inst.SetChatStorage(newDeviceChatStorage(storageDeviceID, m.storage))
+				inst.SetChatStorage(newDeviceChatStorage(storageDeviceID, m.chatStorage))
 			}
 			return inst
 		}
 	}
 
-	inst := NewDeviceInstance(deviceID, nil, newDeviceChatStorage(deviceID, m.storage))
+	inst := NewDeviceInstance(deviceID, nil, newDeviceChatStorage(deviceID, m.chatStorage))
 	m.devices[deviceID] = inst
 	return inst
 }

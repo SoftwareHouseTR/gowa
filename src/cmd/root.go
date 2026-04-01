@@ -393,7 +393,7 @@ func initApp() {
 	dm := whatsapp.GetDeviceManager()
 	if dm != nil {
 		if !config.WhatsappChatStorage {
-			dm.SetStorage(deviceRegistryRepo)
+			dm.SetRegistry(deviceRegistryRepo)
 		}
 		_ = dm.LoadExistingDevices(ctx)
 	}
